@@ -11,15 +11,15 @@ pub mod util {
 
 pub mod data {
     use serde::{Deserialize, Serialize};
-    use std::sync::Arc;
+    use std::{sync::Arc, collections::VecDeque};
     use tokio::sync::Mutex;
 
     use crate::util::now;
 
-    pub type Db = Arc<Mutex<Vec<Record>>>;
+    pub type Db = Arc<Mutex<VecDeque<Record>>>;
 
     pub fn blank_db() -> Db {
-        Arc::new(Mutex::new(Vec::with_capacity(86400)))
+        Arc::new(Mutex::new(VecDeque::with_capacity(86400)))
     }
 
     #[derive(Deserialize, Serialize, Clone)]
@@ -86,7 +86,10 @@ pub mod handlers {
             timestamp: now(),
             rate: input.rate,
         };
-        vec.push(record.clone());
+        if vec.len() >= 86400 {
+            _ = vec.pop_front();
+        }
+        vec.push_back(record.clone());
 
         Ok(warp::reply::json(&record))
     }
@@ -95,7 +98,7 @@ pub mod handlers {
         let records = db.lock().await;
         let records = records.clone();
         let default_record = Record::default();
-        let record = records.last().unwrap_or(&default_record);
+        let record = records.back().unwrap_or(&default_record);
 
         Ok(warp::reply::json(&record))
     }
