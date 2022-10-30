@@ -1,86 +1,102 @@
-use std::{sync::{mpsc, Arc, Mutex}, thread};
+pub mod util {
+    use std::time::{SystemTime, UNIX_EPOCH};
 
-pub struct ThreadPool {
-    workers: Vec<Worker>,
-    sender: Option<mpsc::Sender<Job>>,
-}
-
-impl ThreadPool {
-    /// Create a new ThreadPool.
-    ///
-    /// The size is the number of threads in the pool.
-    ///
-    /// # Panics
-    ///
-    /// The `new` function will panic if the size is zero.
-    pub fn new(size: usize) -> ThreadPool {
-        assert!(size > 0);
-
-        let (sender, receiver) = mpsc::channel();
-        let receiver = Arc::new(Mutex::new(receiver));
-
-        let mut workers = Vec::with_capacity(size);
-        
-        
-        for id in 0..size {
-            let worker = Worker::new(id, Arc::clone(&receiver));
-
-            workers.push(worker);
-        }
-
-        ThreadPool {
-            workers,
-            sender: Some(sender),
-        }
-    }
-
-    pub fn execute<F>(&self, f: F)
-    where
-        F: FnOnce() + Send + 'static,
-    {
-        let job = Box::new(f);
-        self.sender.as_ref().unwrap().send(job).unwrap();
+    pub fn now() -> u128 {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis()
     }
 }
 
-impl Drop for ThreadPool {
-    fn drop(&mut self) {
-        drop(self.sender.take());
+pub mod data {
+    use serde::{Deserialize, Serialize};
+    use std::sync::Arc;
+    use tokio::sync::Mutex;
 
-        for worker in &mut self.workers {
-            println!("Shutting down worker {}", worker.id);
+    use crate::util::now;
 
-            if let Some(thread) = worker.thread.take() {
-                thread.join().unwrap();
+    pub type Db = Arc<Mutex<Vec<Record>>>;
+
+    pub fn blank_db() -> Db {
+        Arc::new(Mutex::new(Vec::with_capacity(86400)))
+    }
+
+    #[derive(Deserialize, Serialize, Clone)]
+    pub struct InputRecord {
+        pub rate: f32,
+    }
+
+    #[derive(Deserialize, Serialize, Clone)]
+    pub struct Record {
+        pub timestamp: u128,
+        pub rate: f32,
+    }
+
+    impl Record {
+        pub fn default() -> Record {
+            Record {
+                timestamp: now(),
+                rate: 0.0,
             }
         }
     }
 }
 
-struct Worker {
-    id: usize,
-    thread: Option<thread::JoinHandle<()>>
-}
+pub mod filters {
+    use warp::Filter;
 
-impl Worker {
-    pub fn new(id: usize, receiver: Arc<Mutex<mpsc::Receiver<Job>>>) -> Worker {
-        let thread = thread::spawn(move || loop {
-            match receiver.lock().unwrap().recv() {
-                Ok(job) => {
-                    println!("Worker {id} got a job");
-                    job();
-                }
-                Err(_) => {
-                    println!("Worker {id} disconnected");
-                    break;
-                }
-            }
-        });
-        Worker {
-            id,
-            thread: Some(thread)
-        }
+    use crate::{data::Db, handlers};
+
+    pub fn records(db: Db) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+        record_get(db.clone())
+            .or(record_create(db.clone()))
+    }
+
+    pub fn record_get(db: Db) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+        warp::path!("poll")
+            .and(warp::get())
+            .and(with_db(db))
+            .and_then(handlers::get_record)
+    }
+
+    pub fn record_create(db: Db) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+        warp::path!("record")
+        .and(warp::post())
+        .and(warp::body::content_length_limit(1024 * 16).and(warp::body::json()))
+        .and(with_db(db))
+        .and_then(handlers::write_record)
+    }
+
+    fn with_db(db: Db) -> impl Filter<Extract = (Db,), Error = std::convert::Infallible> + Clone {
+        warp::any().map(move || db.clone())
     }
 }
 
-type Job = Box<dyn FnOnce() + Send + 'static>;
+pub mod handlers {
+    use std::convert::Infallible;
+
+    use crate::util::now;
+
+    use super::data::{Db, Record, InputRecord};
+
+    pub async fn write_record(input: InputRecord, db: Db) -> Result<impl warp::Reply, Infallible> {
+        let mut vec = db.lock().await;
+        let record = Record {
+            timestamp: now(),
+            rate: input.rate,
+        };
+        vec.push(record.clone());
+
+        Ok(warp::reply::json(&record))
+    }
+
+    pub async fn get_record(db: Db) -> Result<impl warp::Reply, Infallible> {
+        let records = db.lock().await;
+        let records = records.clone();
+        let default_record = Record::default();
+        let record = records.last().unwrap_or(&default_record);
+
+        Ok(warp::reply::json(&record))
+    }
+}
