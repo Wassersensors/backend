@@ -49,8 +49,10 @@ pub mod filters {
     use crate::{data::Db, handlers};
 
     pub fn records(db: Db) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
+        let cors = warp::cors().allow_any_origin();
         record_get(db.clone())
             .or(record_create(db.clone()))
+            .with(cors)
     }
 
     pub fn record_get(db: Db) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
