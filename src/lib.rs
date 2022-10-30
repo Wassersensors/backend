@@ -50,7 +50,7 @@ pub mod filters {
 
     pub fn records(db: Db) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
         record_get(db.clone())
-            .or(record_create(db.clone()))
+            .or(record_create(db))
     }
 
     pub fn record_get(db: Db) -> impl Filter<Extract = impl warp::Reply, Error = warp::Rejection> + Clone {
