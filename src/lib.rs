@@ -25,12 +25,14 @@ pub mod data {
     #[derive(Deserialize, Serialize, Clone)]
     pub struct InputRecord {
         pub rate: f32,
+        pub total_volume: f32,
     }
 
     #[derive(Deserialize, Serialize, Clone)]
     pub struct Record {
         pub timestamp: u128,
         pub rate: f32,
+        pub total_volume: f32,
     }
 
     impl Record {
@@ -38,6 +40,7 @@ pub mod data {
             Record {
                 timestamp: now(),
                 rate: 0.0,
+                total_volume: 0.0,
             }
         }
     }
@@ -85,6 +88,7 @@ pub mod handlers {
         let record = Record {
             timestamp: now(),
             rate: input.rate,
+            total_volume: input.total_volume,
         };
         if vec.len() >= 86400 {
             _ = vec.pop_front();
