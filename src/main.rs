@@ -12,9 +12,11 @@ async fn main() {
     let api = filters::routes(db);
 
     let log = warp::log("backend");
+    let cors = warp::cors().allow_methods(vec!["GET", "POST", "OPTIONS"]);
 
     let routes = api.with(log);
     let routes = routes.with(warp::reply::with::headers(headers));
+    let routes = routes.with(cors);
 
     warp::serve(routes)
         .run(([0, 0, 0, 0], 42069))
