@@ -6,7 +6,7 @@ async fn main() {
     pretty_env_logger::init();
 
     let db = data::blank_db();
-    let api = filters::records(db);
+    let api = filters::routes(db);
 
     let cors = warp::cors().allow_any_origin();
     let log = warp::log("backend");
